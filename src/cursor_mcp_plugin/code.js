@@ -690,6 +690,59 @@ async function createRectangle(params) {
   };
 }
 
+// Helper function to find non-overlapping position
+function findNonOverlappingPosition(newNodeBounds, existingNodes, preferredX, preferredY) {
+  const newRect = {
+    left: preferredX,
+    top: preferredY,
+    right: preferredX + newNodeBounds.width,
+    bottom: preferredY + newNodeBounds.height,
+  };
+
+  // Check if preferred position overlaps with any existing node
+  const hasOverlap = existingNodes.some(existingNode => {
+    if (!existingNode.absoluteBoundingBox) return false;
+    
+    const existing = existingNode.absoluteBoundingBox;
+    const existingRect = {
+      left: existing.x,
+      top: existing.y,
+      right: existing.x + existing.width,
+      bottom: existing.y + existing.height,
+    };
+    
+    // Check for overlap
+    return !(
+      newRect.right < existingRect.left ||
+      newRect.left > existingRect.right ||
+      newRect.bottom < existingRect.top ||
+      newRect.top > existingRect.bottom
+    );
+  });
+
+  if (!hasOverlap) {
+    return { x: preferredX, y: preferredY };
+  }
+
+  // Find the rightmost and bottommost positions
+  let maxX = preferredX;
+  let maxY = preferredY;
+  
+  existingNodes.forEach(node => {
+    if (node.absoluteBoundingBox) {
+      const bounds = node.absoluteBoundingBox;
+      maxX = Math.max(maxX, bounds.x + bounds.width);
+      maxY = Math.max(maxY, bounds.y + bounds.height);
+    }
+  });
+
+  // Position new node with some spacing (20px) from existing elements
+  return {
+    x: maxX + 20,
+    y: preferredY, // Keep same Y to maintain vertical alignment
+  };
+}
+
 async function createFrame(params) {
   const {
     x = 0,
@@ -703,10 +756,10 @@ async function createFrame(params) {
     strokeWeight,
     layoutMode = "NONE",
     layoutWrap = "NO_WRAP",
-    paddingTop = 10,
-    paddingRight = 10,
-    paddingBottom = 10,
-    paddingLeft = 10,
+    paddingTop,
+    paddingRight,
+    paddingBottom,
+    paddingLeft,
     primaryAxisAlignItems = "MIN",
     counterAxisAlignItems = "MIN",
     layoutSizingHorizontal = "FIXED",
@@ -725,11 +778,11 @@ async function createFrame(params) {
     frame.layoutMode = layoutMode;
     frame.layoutWrap = layoutWrap;
 
-    // Set padding values only when layoutMode is not NONE
-    frame.paddingTop = paddingTop;
-    frame.paddingRight = paddingRight;
-    frame.paddingBottom = paddingBottom;
-    frame.paddingLeft = paddingLeft;
+    // Only set padding values if explicitly provided AND layoutMode is not NONE
+    if (paddingTop !== undefined) frame.paddingTop = paddingTop;
+    if (paddingRight !== undefined) frame.paddingRight = paddingRight;
+    if (paddingBottom !== undefined) frame.paddingBottom = paddingBottom;
+    if (paddingLeft !== undefined) frame.paddingLeft = paddingLeft;
 
     // Set axis alignment only when layoutMode is not NONE
     frame.primaryAxisAlignItems = primaryAxisAlignItems;
@@ -743,52 +796,69 @@ async function createFrame(params) {
     frame.itemSpacing = itemSpacing;
   }
 
-  // Set fill color if provided
-  if (fillColor) {
+  // Only set fill color if explicitly provided (don't default to white)
+  if (fillColor && (fillColor.r !== undefined || fillColor.g !== undefined || fillColor.b !== undefined)) {
     const paintStyle = {
       type: "SOLID",
       color: {
-        r: parseFloat(fillColor.r) || 0,
-        g: parseFloat(fillColor.g) || 0,
-        b: parseFloat(fillColor.b) || 0,
+        r: parseFloat(fillColor.r) ?? 0,
+        g: parseFloat(fillColor.g) ?? 0,
+        b: parseFloat(fillColor.b) ?? 0,
       },
-      opacity: parseFloat(fillColor.a) || 1,
+      opacity: parseFloat(fillColor.a) ?? 1,
     };
     frame.fills = [paintStyle];
+  } else {
+    // Explicitly set no fill if not provided
+    frame.fills = [];
   }
 
-  // Set stroke color and weight if provided
-  if (strokeColor) {
+  // Only set stroke if BOTH strokeColor AND strokeWeight are provided
+  // This prevents unnecessary strokes from being applied
+  if (strokeColor && strokeWeight !== undefined && strokeWeight > 0) {
     const strokeStyle = {
       type: "SOLID",
       color: {
-        r: parseFloat(strokeColor.r) || 0,
-        g: parseFloat(strokeColor.g) || 0,
-        b: parseFloat(strokeColor.b) || 0,
+        r: parseFloat(strokeColor.r) ?? 0,
+        g: parseFloat(strokeColor.g) ?? 0,
+        b: parseFloat(strokeColor.b) ?? 0,
       },
-      opacity: parseFloat(strokeColor.a) || 1,
+      opacity: parseFloat(strokeColor.a) ?? 1,
     };
     frame.strokes = [strokeStyle];
-  }
-
-  // Set stroke weight if provided
-  if (strokeWeight !== undefined) {
     frame.strokeWeight = strokeWeight;
+  } else {
+    // Explicitly set no stroke if not properly provided
+    frame.strokes = [];
+    frame.strokeWeight = 0;
   }
 
-  // If parentId is provided, append to that node, otherwise append to current page
-  if (parentId) {
-    const parentNode = await figma.getNodeByIdAsync(parentId);
-    if (!parentNode) {
-      throw new Error(`Parent node not found with ID: ${parentId}`);
-    }
-    if (!("appendChild" in parentNode)) {
-      throw new Error(`Parent node does not support children: ${parentId}`);
-    }
-    parentNode.appendChild(frame);
-  } else {
-    figma.currentPage.appendChild(frame);
+  // Check for overlapping elements before appending
+  const targetParent = parentId 
+    ? await figma.getNodeByIdAsync(parentId)
+    : figma.currentPage;
+    
+  if (!targetParent) {
+    throw new Error(`Parent node not found with ID: ${parentId}`);
   }
+  
+  if (!("appendChild" in targetParent)) {
+    throw new Error(`Parent node does not support children: ${parentId}`);
+  }
+
+  // Check for overlaps with existing children
+  if (targetParent.children && targetParent.children.length > 0) {
+    const adjustedPosition = findNonOverlappingPosition(
+      { width, height },
+      targetParent.children,
+      x,
+      y
+    );
+    frame.x = adjustedPosition.x;
+    frame.y = adjustedPosition.y;
+  }
+
+  targetParent.appendChild(frame);
 
   return {
     id: frame.id,

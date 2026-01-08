@@ -486,9 +486,11 @@ server.tool(
         height,
         name: name || "Frame",
         parentId,
-        fillColor: fillColor || { r: 1, g: 1, b: 1, a: 1 },
-        strokeColor: strokeColor,
-        strokeWeight: strokeWeight,
+        // Only pass fillColor if explicitly provided (don't default to white)
+        fillColor: fillColor || undefined,
+        // Only pass strokeColor if explicitly provided
+        strokeColor: strokeColor || undefined,
+        strokeWeight: strokeWeight || undefined,
         layoutMode,
         layoutWrap,
         paddingTop,
@@ -2606,6 +2608,455 @@ This detailed process ensures you correctly interpret the reaction data, prepare
   }
 );
 
+// Helper function to convert color formats to RGBA
+function convertColorToRGBA(colorValue: string): { r: number; g: number; b: number; a: number } {
+  // Remove whitespace
+  colorValue = colorValue.trim();
+
+  // Hex color (#RRGGBB or #RRGGBBAA)
+  if (colorValue.startsWith('#')) {
+    const hex = colorValue.slice(1);
+    if (hex.length === 3) {
+      // Short hex (#RGB)
+      const r = parseInt(hex[0] + hex[0], 16) / 255;
+      const g = parseInt(hex[1] + hex[1], 16) / 255;
+      const b = parseInt(hex[2] + hex[2], 16) / 255;
+      return { r, g, b, a: 1 };
+    } else if (hex.length === 6) {
+      // Full hex (#RRGGBB)
+      const r = parseInt(hex.slice(0, 2), 16) / 255;
+      const g = parseInt(hex.slice(2, 4), 16) / 255;
+      const b = parseInt(hex.slice(4, 6), 16) / 255;
+      return { r, g, b, a: 1 };
+    } else if (hex.length === 8) {
+      // Hex with alpha (#RRGGBBAA)
+      const r = parseInt(hex.slice(0, 2), 16) / 255;
+      const g = parseInt(hex.slice(2, 4), 16) / 255;
+      const b = parseInt(hex.slice(4, 6), 16) / 255;
+      const a = parseInt(hex.slice(6, 8), 16) / 255;
+      return { r, g, b, a };
+    }
+  }
+
+  // RGB/RGBA color (rgb(255, 0, 0) or rgba(255, 0, 0, 0.5))
+  const rgbMatch = colorValue.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+  if (rgbMatch) {
+    const r = parseInt(rgbMatch[1]) / 255;
+    const g = parseInt(rgbMatch[2]) / 255;
+    const b = parseInt(rgbMatch[3]) / 255;
+    const a = rgbMatch[4] ? parseFloat(rgbMatch[4]) : 1;
+    return { r, g, b, a };
+  }
+
+  throw new Error(`Unsupported color format: ${colorValue}`);
+}
+
+// Code-to-Design Strategy Prompt
+server.prompt(
+  "code_to_design_strategy",
+  "Systematic approach for converting code to accurate Figma designs",
+  (extra) => {
+    return {
+      messages: [
+        {
+          role: "assistant",
+          content: {
+            type: "text",
+            text: `# Code-to-Design Conversion Strategy
+
+## CRITICAL: Extract Design Tokens First
+
+Before creating any Figma elements, you MUST extract and validate design tokens from the code:
+
+### 1. Color Extraction
+- **CSS/Tailwind**: Extract hex/rgb values from classes like \`bg-blue-500\`, \`text-gray-900\`
+- **React Props**: Look for \`color\`, \`backgroundColor\`, \`borderColor\` props
+- **Theme Files**: Check \`colors.ts\`, \`theme.ts\`, \`tailwind.config.ts\` for color definitions
+- **Validation**: Convert all colors to RGBA format (0-1 range) before using in Figma
+- **Default Colors**: Only use colors explicitly defined in code - don't assume defaults
+
+### 2. Typography Extraction
+- **Font Families**: Extract from \`fontFamily\`, \`font-family\`, or Tailwind \`font-*\` classes
+- **Font Sizes**: Convert px/rem/em to numbers (Figma uses px)
+- **Font Weights**: Map to numbers (400=Regular, 700=Bold, etc.)
+- **Line Heights**: Extract \`lineHeight\` or \`leading-*\` classes
+- **Letter Spacing**: Extract \`letterSpacing\` or \`tracking-*\` classes
+
+### 3. Spacing Extraction
+- **Padding/Margin**: Extract from \`padding\`, \`margin\`, or Tailwind spacing classes
+- **Gap**: Extract from \`gap\`, \`gap-x\`, \`gap-y\` or Flexbox/Grid gap values
+- **Border Radius**: Extract from \`borderRadius\`, \`rounded-*\` classes
+- **Convert Units**: Convert rem/em to px (1rem = 16px typically)
+
+### 4. Layout Extraction
+- **Display Types**: Identify \`flex\`, \`grid\`, \`block\`, \`inline-block\`
+- **Flex Direction**: Extract \`flexDirection\` or \`flex-col\`/\`flex-row\`
+- **Alignment**: Extract \`justifyContent\`, \`alignItems\`, \`align-*\` classes
+- **Sizing**: Extract \`width\`, \`height\`, \`minWidth\`, \`maxWidth\` values
+
+## Component Structure Analysis
+
+### 5. Component Hierarchy Mapping
+- **Parent-Child Relationships**: Map React component nesting to Figma frame hierarchy
+- **Conditional Rendering**: Only create elements that are always visible (skip \`{condition && <Element />}\`)
+- **Lists/Maps**: Create one instance, then clone for multiple items
+- **Fragment Wrappers**: Skip React Fragments (\`<>\`) - they don't need frames
+
+### 6. Element Type Mapping
+- **Containers**: \`<div>\`, \`<section>\`, \`<main>\` → \`create_frame\`
+- **Text**: \`<p>\`, \`<h1-h6>\`, \`<span>\` with text → \`create_text\`
+- **Buttons**: \`<button>\` → frame with text child
+- **Inputs**: \`<input>\`, \`<textarea>\` → frame (no text content, just structure)
+- **Images**: \`<img>\` → frame with placeholder (can't import images directly)
+
+## Accuracy Verification Steps
+
+### 7. Pre-Creation Validation
+Before creating each element:
+1. **Check if element already exists**: Use \`get_selection\` or \`get_document_info\` to avoid duplicates
+2. **Validate dimensions**: Ensure width/height match code exactly (convert units properly)
+3. **Validate colors**: Double-check RGBA conversion (0-255 → 0-1)
+4. **Validate positioning**: Calculate relative positions from parent containers
+
+### 8. Post-Creation Verification
+After creating elements:
+1. **Verify with \`get_node_info\`**: Check created element matches code specifications
+2. **Compare dimensions**: Width/height should match code values
+3. **Compare colors**: Fills/strokes should match extracted colors
+4. **Compare typography**: Font size, weight, family should match
+5. **Check hierarchy**: Parent-child relationships should match component structure
+
+### 9. Common Mistakes to Avoid
+- ❌ **Don't assume default values**: Only use values explicitly in code
+- ❌ **Don't create overlapping elements**: Check positions before creating
+- ❌ **Don't add strokes unless code has borders**: Check \`border\`, \`borderWidth\` in code
+- ❌ **Don't add fills unless code has backgrounds**: Check \`backgroundColor\`, \`bg-*\` classes
+- ❌ **Don't skip unit conversion**: Always convert rem/em/vh/vw to px
+- ❌ **Don't create fragments**: Skip React Fragments and wrapper divs that only exist for structure
+
+### 10. Systematic Workflow
+1. **Read code file**: Understand the component structure
+2. **Extract design tokens**: Colors, typography, spacing, layout
+3. **Map component tree**: Identify parent-child relationships
+4. **Create parent frames first**: Build hierarchy top-down
+5. **Add children elements**: Position relative to parents
+6. **Apply styling**: Use extracted tokens for fills, strokes, typography
+7. **Verify accuracy**: Use \`get_node_info\` to confirm matches code
+8. **Fix discrepancies**: Adjust any mismatches found during verification
+
+## Example: Converting a Button Component
+
+\`\`\`tsx
+// Code
+<button className="bg-blue-500 text-white px-4 py-2 rounded-lg">
+  Click me
+</button>
+\`\`\`
+
+**Extraction:**
+- Background: \`bg-blue-500\` → Look up in Tailwind config → \`#3b82f6\` → RGBA(0.231, 0.506, 0.965, 1)
+- Text: \`text-white\` → \`#ffffff\` → RGBA(1, 1, 1, 1)
+- Padding: \`px-4 py-2\` → horizontal: 16px, vertical: 8px
+- Border radius: \`rounded-lg\` → 8px
+- No border/stroke in code → Don't add stroke
+
+**Figma Creation:**
+1. \`create_frame\` with fillColor, padding, cornerRadius
+2. \`create_text\` inside frame with fontColor
+3. Verify with \`get_node_info\`
+
+This systematic approach ensures accurate code-to-design conversion.`,
+          },
+        },
+      ],
+      description: "Systematic approach for converting code to accurate Figma designs",
+    };
+  }
+);
+
+// Validate Design Tokens Tool
+server.tool(
+  "validate_design_tokens",
+  "Validate extracted design tokens before creating Figma elements. Takes extracted tokens and validates their format and values.",
+  {
+    colors: z.array(z.object({
+      name: z.string().optional(),
+      value: z.string().describe("Color value in hex, rgb, or rgba format"),
+      usage: z.string().describe("Where this color is used (e.g., 'button background', 'text color')")
+    })).optional(),
+    typography: z.array(z.object({
+      fontSize: z.number().optional(),
+      fontWeight: z.number().optional(),
+      fontFamily: z.string().optional(),
+      lineHeight: z.number().optional(),
+      letterSpacing: z.number().optional()
+    })).optional(),
+    spacing: z.array(z.object({
+      name: z.string().optional(),
+      value: z.number().describe("Spacing value in pixels"),
+      usage: z.string().describe("Where this spacing is used")
+    })).optional()
+  },
+  async ({ colors, typography, spacing }: any) => {
+    try {
+      const validationResults: any = {
+        valid: true,
+        errors: [],
+        warnings: [],
+        converted: {
+          colors: [],
+          typography: [],
+          spacing: []
+        }
+      };
+
+      // Validate and convert colors
+      if (colors) {
+        for (const color of colors) {
+          try {
+            const rgba = convertColorToRGBA(color.value);
+            validationResults.converted.colors.push({
+              name: color.name,
+              usage: color.usage,
+              original: color.value,
+              rgba: rgba,
+              valid: true
+            });
+          } catch (error) {
+            validationResults.valid = false;
+            validationResults.errors.push(`Invalid color format: ${color.value} (${color.usage})`);
+          }
+        }
+      }
+
+      // Validate typography
+      if (typography) {
+        for (const typo of typography) {
+          const warnings = [];
+          if (typo.fontSize && (typo.fontSize < 8 || typo.fontSize > 200)) {
+            warnings.push(`Font size ${typo.fontSize}px seems unusual`);
+          }
+          if (typo.fontWeight && (typo.fontWeight < 100 || typo.fontWeight > 900)) {
+            validationResults.errors.push(`Invalid font weight: ${typo.fontWeight}`);
+            validationResults.valid = false;
+          }
+          validationResults.converted.typography.push({
+            ...typo,
+            warnings
+          });
+        }
+      }
+
+      // Validate spacing
+      if (spacing) {
+        for (const space of spacing) {
+          if (space.value < 0) {
+            validationResults.errors.push(`Negative spacing: ${space.value}px (${space.usage})`);
+            validationResults.valid = false;
+          }
+          if (space.value > 1000) {
+            validationResults.warnings.push(`Large spacing value: ${space.value}px (${space.usage})`);
+          }
+          validationResults.converted.spacing.push({
+            name: space.name,
+            usage: space.usage,
+            value: space.value,
+            valid: true
+          });
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(validationResults, null, 2)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error validating design tokens: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+
+// Verify Element Accuracy Tool
+server.tool(
+  "verify_element_accuracy",
+  "Verify that a created Figma element accurately matches the source code specifications",
+  {
+    nodeId: z.string().describe("The ID of the Figma node to verify"),
+    expectedSpecs: z.object({
+      width: z.number().optional(),
+      height: z.number().optional(),
+      fillColor: z.object({
+        r: z.number(),
+        g: z.number(),
+        b: z.number(),
+        a: z.number().optional()
+      }).optional(),
+      strokeColor: z.object({
+        r: z.number(),
+        g: z.number(),
+        b: z.number(),
+        a: z.number().optional()
+      }).optional(),
+      strokeWeight: z.number().optional(),
+      cornerRadius: z.number().optional(),
+      fontSize: z.number().optional(),
+      fontWeight: z.number().optional(),
+      fontColor: z.object({
+        r: z.number(),
+        g: z.number(),
+        b: z.number(),
+        a: z.number().optional()
+      }).optional(),
+      padding: z.object({
+        top: z.number().optional(),
+        right: z.number().optional(),
+        bottom: z.number().optional(),
+        left: z.number().optional()
+      }).optional()
+    }).describe("Expected specifications from the source code")
+  },
+  async ({ nodeId, expectedSpecs }: any) => {
+    try {
+      // Get the actual node info from Figma
+      const nodeInfo = await sendCommandToFigma("get_node_info", { nodeId });
+      const actual = filterFigmaNode(nodeInfo);
+      
+      const discrepancies: string[] = [];
+      const matches: string[] = [];
+
+      // Compare dimensions
+      if (expectedSpecs.width !== undefined) {
+        const actualWidth = actual.absoluteBoundingBox?.width;
+        if (actualWidth && Math.abs(actualWidth - expectedSpecs.width) > 1) { // 1px tolerance
+          discrepancies.push(`Width: expected ${expectedSpecs.width}px, got ${actualWidth}px`);
+        } else if (actualWidth) {
+          matches.push(`Width: ${actualWidth}px ✓`);
+        }
+      }
+
+      if (expectedSpecs.height !== undefined) {
+        const actualHeight = actual.absoluteBoundingBox?.height;
+        if (actualHeight && Math.abs(actualHeight - expectedSpecs.height) > 1) {
+          discrepancies.push(`Height: expected ${expectedSpecs.height}px, got ${actualHeight}px`);
+        } else if (actualHeight) {
+          matches.push(`Height: ${actualHeight}px ✓`);
+        }
+      }
+
+      // Compare fill color
+      if (expectedSpecs.fillColor) {
+        const actualFill = actual.fills?.[0];
+        if (actualFill && actualFill.type === 'SOLID') {
+          const expected = expectedSpecs.fillColor;
+          const actualColor = actualFill.color;
+          const tolerance = 0.01; // Small tolerance for floating point
+          
+          if (
+            Math.abs(actualColor.r - expected.r) > tolerance ||
+            Math.abs(actualColor.g - expected.g) > tolerance ||
+            Math.abs(actualColor.b - expected.b) > tolerance ||
+            Math.abs((actualFill.opacity || 1) - (expected.a || 1)) > tolerance
+          ) {
+            discrepancies.push(`Fill color: expected RGBA(${expected.r}, ${expected.g}, ${expected.b}, ${expected.a || 1}), got RGBA(${actualColor.r}, ${actualColor.g}, ${actualColor.b}, ${actualFill.opacity || 1})`);
+          } else {
+            matches.push(`Fill color: matches ✓`);
+          }
+        } else if (!actualFill && expectedSpecs.fillColor) {
+          discrepancies.push(`Fill color: expected but not found`);
+        }
+      }
+
+      // Compare stroke
+      if (expectedSpecs.strokeColor && expectedSpecs.strokeWeight) {
+        const actualStroke = actual.strokes?.[0];
+        if (actualStroke && actualStroke.type === 'SOLID') {
+          const expected = expectedSpecs.strokeColor;
+          const actualColor = actualStroke.color;
+          const tolerance = 0.01;
+          
+          if (
+            Math.abs(actualColor.r - expected.r) > tolerance ||
+            Math.abs(actualColor.g - expected.g) > tolerance ||
+            Math.abs(actualColor.b - expected.b) > tolerance ||
+            Math.abs((actualStroke.opacity || 1) - (expected.a || 1)) > tolerance
+          ) {
+            discrepancies.push(`Stroke color: mismatch`);
+          } else {
+            matches.push(`Stroke color: matches ✓`);
+          }
+        } else if (!actualStroke && expectedSpecs.strokeColor) {
+          discrepancies.push(`Stroke: expected but not found`);
+        }
+
+        if (expectedSpecs.strokeWeight !== undefined) {
+          const actualWeight = actual.strokeWeight || 0;
+          if (Math.abs(actualWeight - expectedSpecs.strokeWeight) > 0.1) {
+            discrepancies.push(`Stroke weight: expected ${expectedSpecs.strokeWeight}px, got ${actualWeight}px`);
+          } else {
+            matches.push(`Stroke weight: ${actualWeight}px ✓`);
+          }
+        }
+      }
+
+      // Compare typography (for text nodes)
+      if (expectedSpecs.fontSize !== undefined && actual.style) {
+        if (Math.abs(actual.style.fontSize - expectedSpecs.fontSize) > 1) {
+          discrepancies.push(`Font size: expected ${expectedSpecs.fontSize}px, got ${actual.style.fontSize}px`);
+        } else {
+          matches.push(`Font size: ${actual.style.fontSize}px ✓`);
+        }
+      }
+
+      if (expectedSpecs.fontWeight !== undefined && actual.style) {
+        if (actual.style.fontWeight !== expectedSpecs.fontWeight) {
+          discrepancies.push(`Font weight: expected ${expectedSpecs.fontWeight}, got ${actual.style.fontWeight}`);
+        } else {
+          matches.push(`Font weight: ${actual.style.fontWeight} ✓`);
+        }
+      }
+
+      const result = {
+        nodeId,
+        nodeName: actual.name,
+        accurate: discrepancies.length === 0,
+        matches,
+        discrepancies,
+        summary: discrepancies.length === 0 
+          ? "✓ Element accurately matches source code specifications"
+          : `⚠ Found ${discrepancies.length} discrepancy(ies) that need to be fixed`
+      };
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error verifying element: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
 
 // Define command types and parameters
 type FigmaCommand =
