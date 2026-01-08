@@ -801,11 +801,11 @@ async function createFrame(params) {
     const paintStyle = {
       type: "SOLID",
       color: {
-        r: parseFloat(fillColor.r) ?? 0,
-        g: parseFloat(fillColor.g) ?? 0,
-        b: parseFloat(fillColor.b) ?? 0,
+        r: fillColor.r != null ? parseFloat(fillColor.r) : 0,
+        g: fillColor.g != null ? parseFloat(fillColor.g) : 0,
+        b: fillColor.b != null ? parseFloat(fillColor.b) : 0,
       },
-      opacity: parseFloat(fillColor.a) ?? 1,
+      opacity: fillColor.a != null ? parseFloat(fillColor.a) : 1,
     };
     frame.fills = [paintStyle];
   } else {
@@ -819,11 +819,11 @@ async function createFrame(params) {
     const strokeStyle = {
       type: "SOLID",
       color: {
-        r: parseFloat(strokeColor.r) ?? 0,
-        g: parseFloat(strokeColor.g) ?? 0,
-        b: parseFloat(strokeColor.b) ?? 0,
+        r: strokeColor.r != null ? parseFloat(strokeColor.r) : 0,
+        g: strokeColor.g != null ? parseFloat(strokeColor.g) : 0,
+        b: strokeColor.b != null ? parseFloat(strokeColor.b) : 0,
       },
-      opacity: parseFloat(strokeColor.a) ?? 1,
+      opacity: strokeColor.a != null ? parseFloat(strokeColor.a) : 1,
     };
     frame.strokes = [strokeStyle];
     frame.strokeWeight = strokeWeight;
